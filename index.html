@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TKDFightStamp</title>
+  <meta name="description" content="TKDFightStamp 是一個 YouTube 跆拳道對戰時間戳標記工具，協助你快速整理逐場時間點與對戰資訊。">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="hero card">
+      <div class="hero-copy">
+        <div class="product-badge">TKDFightStamp</div>
+        <h1>把 4.5 小時比賽影片整理成可查找的逐場時間戳</h1>
+        <p>載入 YouTube 影片、對照場次表、在選手準備對戰前按一下就記下時間。適合逐場整理跆拳道對戰影片、說明欄索引與賽事回看。</p>
+        <div class="feature-chips">
+          <span>逐場標記</span>
+          <span>YouTube 播放控制</span>
+          <span>TXT 匯出</span>
+          <span>本機儲存進度</span>
+        </div>
+      </div>
+      <div class="hero-side">
+        <div class="status-panel">
+          <div>目前時間 <strong id="current-time">00:00:00</strong></div>
+          <div>已標記 <strong id="recorded-count">0</strong> / <strong id="total-count">0</strong></div>
+        </div>
+        <div class="hero-note">
+          建議流程：先貼入 YouTube 影片，再用快捷鍵 <strong>N</strong> 逐場記錄時間，最後從右側匯出結果直接貼回說明欄或備註檔。
+        </div>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="video-panel card">
+        <div class="section-title-row">
+          <h2>影片標記</h2>
+          <span class="section-tag">核心工作區</span>
+        </div>
+        <label class="field-label" for="youtube-url">影片網址或 ID</label>
+        <div class="input-row">
+          <input id="youtube-url" type="text" placeholder="https://www.youtube.com/watch?v=...">
+          <button id="load-video-btn" type="button">載入影片</button>
+        </div>
+        <div id="player-frame" class="player-frame"></div>
+        <div class="player-actions">
+          <button id="back-5-btn" type="button">倒退 60 秒</button>
+          <button id="forward-5-btn" type="button">快進 60 秒</button>
+          <button id="toggle-play-btn" type="button">播放 / 暫停</button>
+        </div>
+        <p class="hint">快捷鍵：<kbd>N</kbd> 記錄並跳下一場，<kbd>P</kbd> 上一場，<kbd>J</kbd> 倒退 60 秒，<kbd>L</kbd> 快進 60 秒，<kbd>Space</kbd> 播放/暫停。</p>
+      </section>
+
+      <section class="matches-panel card">
+        <div class="section-title-row">
+          <h2>對戰清單</h2>
+          <div class="inline-stats">
+            <span>待處理 <strong id="remaining-count">0</strong></span>
+          </div>
+        </div>
+        <label class="field-label" for="event-url">賽事網址</label>
+        <div class="input-row">
+          <input id="event-url" type="text" placeholder="https://wego-tkd-web.onrender.com/event/3">
+          <button id="generate-from-event-btn" type="button">抓取對戰表</button>
+        </div>
+        <div id="fetch-status" class="fetch-status" aria-live="polite"></div>
+        <label class="field-label" for="source-text">原始場次表</label>
+        <textarea id="source-text" rows="8" placeholder="可直接貼上場次表，或讓工具自動讀取同資料夾的對打第二天-各場地對戰資訊.txt"></textarea>
+        <div class="input-row compact-gap">
+          <button id="load-matches-btn" type="button">載入場次</button>
+          <button id="reset-progress-btn" type="button" class="secondary">清空所有時間戳</button>
+          <label class="checkbox-label">
+            <input id="auto-next" type="checkbox" checked>
+            記錄後自動跳下一場
+          </label>
+        </div>
+
+        <div class="match-toolbar">
+          <button id="prev-btn" type="button" class="secondary">上一場</button>
+          <button id="mark-btn" type="button">記錄目前時間</button>
+          <button id="clear-btn" type="button" class="secondary">清除此場</button>
+          <button id="next-btn" type="button" class="secondary">下一場</button>
+        </div>
+
+        <div id="current-match-card" class="current-match-card empty">
+          尚未載入場次
+        </div>
+
+        <div id="match-list" class="match-list"></div>
+      </section>
+
+      <section class="export-panel card">
+        <div class="section-title-row">
+          <h2>匯出時間戳</h2>
+          <span class="section-tag">可直接複製</span>
+        </div>
+        <div class="input-row compact-gap">
+          <button id="copy-output-btn" type="button">複製結果</button>
+          <button id="download-output-btn" type="button" class="secondary">下載 TXT</button>
+        </div>
+        <textarea id="output-text" rows="20" readonly></textarea>
+        <p class="hint">匯出格式會在每場前面補上時間戳，例如 01:23:45 101 弘道國中 郭采婕...</p>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
