@@ -2,6 +2,7 @@ const DEFAULT_SOURCE_FILE = "./對打第二天-各場地對戰資訊.txt";
 const STORAGE_KEY = "tkd-fight-stamp-v1";
 const SEEK_SECONDS = 60;
 const EVENT_BASE_URL = "https://wego-tkd-web.onrender.com";
+const TONDAR_HOST = "www.tondar-cn.com";
 
 const state = {
   sourceText: "",
@@ -16,6 +17,7 @@ const state = {
 const elements = {
   youtubeUrl: document.getElementById("youtube-url"),
   eventUrl: document.getElementById("event-url"),
+  eventDate: document.getElementById("event-date"),
   generateFromEventBtn: document.getElementById("generate-from-event-btn"),
   fetchStatus: document.getElementById("fetch-status"),
   loadVideoBtn: document.getElementById("load-video-btn"),
@@ -91,6 +93,37 @@ function parseEventId(input) {
     const match = trimmed.match(/\/event\/(\d+)/);
     return match?.[1] || "";
   }
+}
+
+function parseTondarEventNo(input) {
+  const trimmed = input.trim();
+  if (!trimmed) return "";
+
+  try {
+    const url = new URL(trimmed);
+    if (!url.hostname.includes(TONDAR_HOST)) return "";
+    return url.searchParams.get("EventNo") || "";
+  } catch (_error) {
+    const match = trimmed.match(/[?&]EventNo=(\d+)/i);
+    return match?.[1] || "";
+  }
+}
+
+function detectEventSource(input) {
+  const trimmed = input.trim();
+  if (!trimmed) return { source: "unknown", eventId: "" };
+
+  const tondarEventNo = parseTondarEventNo(trimmed);
+  if (tondarEventNo) {
+    return { source: "tondar", eventId: tondarEventNo };
+  }
+
+  const wegoEventId = parseEventId(trimmed);
+  if (wegoEventId) {
+    return { source: "wego", eventId: wegoEventId };
+  }
+
+  return { source: "unknown", eventId: "" };
 }
 
 function simplifyTeamName(team) {
@@ -176,6 +209,24 @@ function compareMatchSortKey(left, right) {
 function setFetchStatus(message, tone = "") {
   elements.fetchStatus.textContent = message;
   elements.fetchStatus.className = tone ? `fetch-status ${tone}` : "fetch-status";
+}
+
+function setDateOptions(dates = [], preserveValue = "") {
+  const fragment = document.createDocumentFragment();
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "";
+  defaultOption.textContent = "全部日期";
+  fragment.appendChild(defaultOption);
+
+  for (const date of dates) {
+    const option = document.createElement("option");
+    option.value = date;
+    option.textContent = date;
+    fragment.appendChild(option);
+  }
+
+  elements.eventDate.replaceChildren(fragment);
+  elements.eventDate.value = dates.includes(preserveValue) ? preserveValue : "";
 }
 
 function sleep(ms) {
@@ -295,6 +346,65 @@ async function generateSourceTextFromEvent(eventId) {
   return `${lines.join("\n")}\n`;
 }
 
+async function generateSourceTextFromTondar(eventNo, dateValue) {
+  const query = new URLSearchParams({ eventNo });
+  if (dateValue) query.set("date", dateValue);
+
+  setFetchStatus(`正在透過代理抓取全中運賽程 EventNo=${eventNo}${dateValue ? `，日期 ${dateValue}` : ""}...`, "pending");
+  const response = await fetch(`/api/tondar-schedule?${query.toString()}`);
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const message = payload?.error || `API 回傳 HTTP ${response.status}`;
+    if (response.status === 404 && window.location.protocol === "http:") {
+      throw new Error(`${message}。若你是在本機用 python3 -m http.server 啟動，這個模式不支援 /api 代理；請改用部署後網址或 vercel dev。`);
+    }
+    throw new Error(message);
+  }
+
+  setFetchStatus(`抓取完成，共 ${payload.matchCount || 0} 場。`, "success");
+  return payload.sourceText || "";
+}
+
+async function loadTondarDates(eventNo) {
+  const response = await fetch(`/api/tondar-schedule?mode=dates&eventNo=${encodeURIComponent(eventNo)}`);
+  const payload = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const message = payload?.error || `API 回傳 HTTP ${response.status}`;
+    if (response.status === 404 && window.location.protocol === "http:") {
+      throw new Error(`${message}。若你是在本機用 python3 -m http.server 啟動，這個模式不支援 /api 代理；請改用部署後網址或 vercel dev。`);
+    }
+    throw new Error(message);
+  }
+
+  return Array.isArray(payload.dates) ? payload.dates : [];
+}
+
+async function refreshEventDateOptions() {
+  const { source, eventId } = detectEventSource(elements.eventUrl.value);
+  const preservedValue = elements.eventDate.value;
+
+  if (source !== "tondar" || !eventId) {
+    setDateOptions([], "");
+    saveState();
+    return;
+  }
+
+  setFetchStatus(`正在讀取全中運 EventNo=${eventId} 的可選日期...`, "pending");
+  try {
+    const dates = await loadTondarDates(eventId);
+    setDateOptions(dates, preservedValue);
+    setFetchStatus(`已載入 ${dates.length} 個可選日期。`, "success");
+  } catch (error) {
+    setDateOptions([], "");
+    const message = describeError(error);
+    setFetchStatus(`日期載入失敗：${message}`, "error");
+  } finally {
+    saveState();
+  }
+}
+
 function buildMatchKey(match) {
   return `${match.court}|${match.matchNumber}|${match.description}`;
 }
@@ -307,7 +417,7 @@ function parseMatches(text, savedTimestamps = {}) {
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) continue;
-    if (/^第.+場地$/.test(line)) {
+    if (/場地$/.test(line)) {
       currentCourt = line;
       continue;
     }
@@ -419,6 +529,7 @@ function saveState() {
   const payload = {
     videoInput: elements.youtubeUrl.value.trim(),
     eventInput: elements.eventUrl.value.trim(),
+    eventDateInput: elements.eventDate.value.trim(),
     sourceText: elements.sourceText.value,
     selectedIndex: state.selectedIndex,
     timestamps,
@@ -562,8 +673,12 @@ async function bootstrapSourceText() {
   if (restored?.sourceText) {
     elements.sourceText.value = restored.sourceText;
     elements.eventUrl.value = restored.eventInput || "";
+    setDateOptions([], restored.eventDateInput || "");
     elements.autoNext.checked = restored.autoNext !== false;
     loadMatchesFromText();
+    if (detectEventSource(elements.eventUrl.value).source === "tondar") {
+      refreshEventDateOptions();
+    }
     return;
   }
 
@@ -609,10 +724,10 @@ elements.loadVideoBtn.addEventListener("click", () => {
   createOrLoadPlayer(parseVideoId(elements.youtubeUrl.value));
 });
 elements.generateFromEventBtn.addEventListener("click", async () => {
-  const eventId = parseEventId(elements.eventUrl.value);
+  const { source, eventId } = detectEventSource(elements.eventUrl.value);
   if (!eventId) {
-    setFetchStatus("請輸入有效的賽事網址，例如 https://wego-tkd-web.onrender.com/event/3", "error");
-    window.alert("請輸入有效的賽事網址，例如 https://wego-tkd-web.onrender.com/event/3");
+    setFetchStatus("請輸入有效的賽事網址，例如 wego event 頁或全中運 ScheduleC.php?EventNo=10", "error");
+    window.alert("請輸入有效的賽事網址，例如 https://wego-tkd-web.onrender.com/event/3 或 https://www.tondar-cn.com/Competition/ScheduleC.php?EventNo=10");
     return;
   }
 
@@ -620,7 +735,10 @@ elements.generateFromEventBtn.addEventListener("click", async () => {
   elements.generateFromEventBtn.disabled = true;
   elements.generateFromEventBtn.textContent = "抓取中...";
   try {
-    const sourceText = await generateSourceTextFromEvent(eventId);
+    const dateValue = elements.eventDate.value.trim();
+    const sourceText = source === "tondar"
+      ? await generateSourceTextFromTondar(eventId, dateValue)
+      : await generateSourceTextFromEvent(eventId);
     elements.sourceText.value = sourceText;
     loadMatchesFromText();
   } catch (error) {
@@ -652,7 +770,8 @@ elements.nextBtn.addEventListener("click", () => selectRelative(1));
 elements.copyOutputBtn.addEventListener("click", copyOutput);
 elements.downloadOutputBtn.addEventListener("click", downloadOutput);
 elements.sourceText.addEventListener("change", saveState);
-elements.eventUrl.addEventListener("change", saveState);
+elements.eventUrl.addEventListener("change", refreshEventDateOptions);
+elements.eventDate.addEventListener("change", saveState);
 elements.youtubeUrl.addEventListener("change", saveState);
 elements.autoNext.addEventListener("change", saveState);
 document.addEventListener("keydown", handleKeyboard);

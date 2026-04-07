@@ -1,6 +1,6 @@
 # TKDFightStamp
 
-TKDFightStamp 是一個純前端工具，讓你一邊看 YouTube 影片、一邊逐場記錄跆拳道對戰時間戳，最後輸出成可貼回場次表或 YouTube 介紹欄的文字。
+TKDFightStamp 是一個以靜態頁面為主、搭配少量 Vercel API 代理的工具，讓你一邊看 YouTube 影片、一邊逐場記錄跆拳道對戰時間戳，最後輸出成可貼回場次表或 YouTube 介紹欄的文字。
 
 ## 使用方式
 
@@ -32,7 +32,7 @@ http://localhost:8000
 - GitHub repo: `tkd-fight-stamp`
 - Vercel project: `tkd-fight-stamp`
 
-這個工具是純靜態頁面，可直接部署到 Vercel。
+這個工具前端是靜態頁面；若要支援全中運 `tondar-cn.com` 的賽程抓取，需要一起部署 Vercel API 代理。
 
 ### 部署方式
 
@@ -58,9 +58,18 @@ http://localhost:8000
 
 ```text
 https://wego-tkd-web.onrender.com/event/3
+https://www.tondar-cn.com/Competition/ScheduleC.php?EventNo=10
 ```
 
 然後按下「抓取對戰表」。
+
+如果是全中運網站，可直接從下拉選單選競賽日期，例如：
+
+```text
+1150329
+```
+
+保留「全部日期」時會抓該賽事所有日期。
 
 工具會自動：
 
@@ -68,6 +77,13 @@ https://wego-tkd-web.onrender.com/event/3
 2. 依場地與場次排序
 3. 產出整理好的場次表
 4. 直接載入右側對戰清單
+
+### 全中運站台注意事項
+
+- 全中運網站的 PHP 查詢端點沒有對外開放前端跨網域存取
+- 因此本專案是透過 [api/tondar-schedule.js](api/tondar-schedule.js) 代理抓資料
+- 如果你在本機只用 `python3 -m http.server 8000` 啟動，這個代理不會存在
+- 本機若要測全中運抓取，請改用 `vercel dev`，或直接測部署後網址
 
 ## 匯出結果
 

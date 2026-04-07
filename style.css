@@ -191,6 +191,7 @@ textarea {
 }
 
 input[type="text"],
+select,
 textarea {
   width: 100%;
   border: 1px solid var(--line);

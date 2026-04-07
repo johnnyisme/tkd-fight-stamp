@@ -61,8 +61,14 @@
         </div>
         <label class="field-label" for="event-url">賽事網址</label>
         <div class="input-row">
-          <input id="event-url" type="text" placeholder="https://wego-tkd-web.onrender.com/event/3">
+          <input id="event-url" type="text" placeholder="https://wego-tkd-web.onrender.com/event/3 或 https://www.tondar-cn.com/Competition/ScheduleC.php?EventNo=10">
           <button id="generate-from-event-btn" type="button">抓取對戰表</button>
+        </div>
+        <label class="field-label" for="event-date">競賽日期（全中運選填）</label>
+        <div class="input-row">
+          <select id="event-date">
+            <option value="">全部日期</option>
+          </select>
         </div>
         <div id="fetch-status" class="fetch-status" aria-live="polite"></div>
         <label class="field-label" for="source-text">原始場次表</label>
