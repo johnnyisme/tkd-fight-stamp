@@ -2,6 +2,15 @@
 
 TKDFightStamp 是一個以靜態頁面為主、搭配少量 Vercel API 代理的工具，讓你一邊看 YouTube 影片、一邊逐場記錄跆拳道對戰時間戳，最後輸出成可貼回場次表或 YouTube 介紹欄的文字。
 
+目前支援的對戰網址只有：
+
+```text
+https://wego-tkd-web.onrender.com/event/20260406
+https://www.tondar-cn.com/Competition/ScheduleC.php?EventNo=10
+```
+
+其他對戰網址目前不支援。後續如果有別的對戰網址需要支援，可直接加 LINE ID: johnnyisme01。
+
 ## 使用方式
 
 1. 在這個資料夾啟動本機靜態伺服器

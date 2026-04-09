@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TKDFightStamp</title>
-  <meta name="description" content="TKDFightStamp 是一個 YouTube 跆拳道對戰時間戳標記工具，協助你快速整理逐場時間點與對戰資訊。">
+  <title>TKDFightStamp | 支援 wego-tkd-web.onrender.com 與 tondar-cn.com</title>
+  <meta name="description" content="TKDFightStamp 是一個 YouTube 跆拳道對戰時間戳標記工具，目前支援 wego-tkd-web.onrender.com 與 tondar-cn.com 的對戰網址。">
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -13,7 +13,7 @@
       <div class="hero-copy">
         <div class="product-badge">TKDFightStamp</div>
         <h1>把 4.5 小時比賽影片整理成可查找的逐場時間戳</h1>
-        <p>載入 YouTube 影片、對照場次表、在選手準備對戰前按一下就記下時間。適合逐場整理跆拳道對戰影片、說明欄索引與賽事回看。</p>
+        <p>載入 YouTube 影片、對照場次表、在選手準備對戰前按一下就記下時間。適合逐場整理跆拳道對戰影片、說明欄索引與賽事回看。目前僅支援 wego-tkd-web.onrender.com 與 tondar-cn.com 的對戰網址。</p>
         <div class="feature-chips">
           <span>逐場標記</span>
           <span>YouTube 播放控制</span>
@@ -64,6 +64,7 @@
           <input id="event-url" type="text" placeholder="https://wego-tkd-web.onrender.com/event/3 或 https://www.tondar-cn.com/Competition/ScheduleC.php?EventNo=10">
           <button id="generate-from-event-btn" type="button">抓取對戰表</button>
         </div>
+        <p class="hint">目前支援的對戰網址只有這兩種：`https://wego-tkd-web.onrender.com/event/20260406`、`https://www.tondar-cn.com/Competition/ScheduleC.php?EventNo=10`。其他對戰網址目前不支援；若有新需求可直接加 LINE ID: johnnyisme01。</p>
         <label class="field-label" for="event-date">競賽日期（全中運選填）</label>
         <div class="input-row">
           <select id="event-date">
