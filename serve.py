@@ -150,8 +150,16 @@ def detect_pipeline(video, round_full, model_set="national", apply_filter=True):
                               str(round_full), "0", "0", "4"], "掃描開賽交界", env)
         if not ok:
             set_progress(running=False, done=True, error="掃描階段失敗\n" + tail); return
+        # round_full=0(自動偵測)時,scan 已把實際判定值寫進 crossings_web.json。
+        # 讀回來給 finalize 的 find_start_moment 用(否則 ROUND_FULL=0 會裁錯)。
+        real_round = round_full
+        try:
+            real_round = int(json.load(open(crossings)).get("round_full_sec", round_full)) or round_full
+        except Exception:
+            pass
+        env["ROUND_FULL"] = str(real_round)
         # 記住這次掃描用的影片/賽制/模型,供之後「重新過濾」不必重掃
-        set_progress(last_video=video, last_round=round_full, last_model=model_set)
+        set_progress(last_video=video, last_round=real_round, last_model=model_set)
         # 2+3. finalize + OCR
         result = _finalize_and_ocr(env, ms, video)
         if result is None:

@@ -84,6 +84,29 @@ def timer_at(video, t):
     return best, bc
 
 
+def detect_round_full(video, end, samples=60):
+    """自動判賽制:抽 samples 幀讀計時器,看讀到的最大值接近 90(1:30)還是 120(2:00)。
+    避免使用者手選回合秒數選錯(選錯會整支掃不到,且不報錯)。回傳 90 或 120。"""
+    step = max(1, end // samples)
+    votes90 = votes120 = 0
+    seen_max = 0
+    for t in range(5, end, step):
+        # timer_at 內部用 parse_timer 預設上限 120,涵蓋 90/120 兩種賽制
+        sec, conf = timer_at(video, t)
+        if sec is None or conf < 0.6:
+            continue
+        seen_max = max(seen_max, sec)
+        if 88 <= sec <= 92:
+            votes90 += 1
+        elif 118 <= sec <= 122:
+            votes120 += 1
+    # 有明確 2:00 讀數 → 120;否則若看過接近 90 的滿值 → 90;都沒有預設 120
+    guess = 120 if votes120 >= max(1, votes90) else 90
+    print(f"AUTO round_full: 讀到最大值 {seen_max//60}:{seen_max%60:02d}, "
+          f"votes(90={votes90},120={votes120}) → 判定 {guess}", flush=True)
+    return guess
+
+
 def main():
     video = sys.argv[1]; out_json = sys.argv[2]; round_full = int(sys.argv[3])
     start = int(sys.argv[4]) if len(sys.argv) > 4 else 0
@@ -98,6 +121,10 @@ def main():
                            stdout=subprocess.PIPE, text=True)
         end = int(float(r.stdout.strip()))
     reader()
+    # round_full=0 → 自動偵測賽制(90 或 120),免得手選選錯整支掃不到
+    if round_full == 0:
+        print("PROGRESS 0.0%  自動偵測賽制中...", flush=True)
+        round_full = detect_round_full(video, end)
     # HOLD_MODE=1 走 tondar 那台計分板的判據(開賽後 OCR 不穩,靠「穩定待命→離開」)。
     # 預設(不設)= 中正盃/國選舊機驗證過的原判據,完全不動,保住既有結果。
     hold_mode = os.environ.get("HOLD_MODE") == "1"
