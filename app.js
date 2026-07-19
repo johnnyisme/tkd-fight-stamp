@@ -1,797 +1,488 @@
-const DEFAULT_SOURCE_FILE = "./對打第二天-各場地對戰資訊.txt";
-const STORAGE_KEY = "tkd-fight-stamp-v1";
-const SEEK_SECONDS = 60;
-const EVENT_BASE_URL = "https://wego-tkd-web.onrender.com";
-const TONDAR_HOST = "www.tondar-cn.com";
+// TKDFightStamp — AI 開賽時間戳複審(純文字工作流)
+// 左影片 + 右純文字編輯器。每行「時間戳 場次」,自由改/插/刪。
+// 游標所在行可跳轉影片;播到精確點可插入目前時間。
 
-const state = {
-  sourceText: "",
-  matches: [],
-  selectedIndex: 0,
-  videoInput: "",
-  player: null,
-  playerReady: false,
-  lastKnownTime: 0,
+const STORAGE_KEY = "tkd-review-text-v1";
+const SEEK_SECONDS = 5;
+
+const state = { player: null, playerReady: false, lastKnownTime: 0 };
+const el = (id) => document.getElementById(id);
+const E = {
+  youtubeUrl: el("youtube-url"),
+  loadVideoBtn: el("load-video-btn"),
+  currentTime: el("current-time"),
+  back5Btn: el("back-5-btn"),
+  forward5Btn: el("forward-5-btn"),
+  togglePlayBtn: el("toggle-play-btn"),
+  loadCandidatesBtn: el("load-candidates-btn"),
+  jumpLineBtn: el("jump-line-btn"),
+  insertNowBtn: el("insert-now-btn"),
+  candidateStatus: el("candidate-status"),
+  lineStatus: el("line-status"),
+  editor: el("editor"),
+  finalOutput: el("final-output"),
+  copyBtn: el("copy-btn"),
+  buildFinalBtn: el("build-final-btn"),
+  eventId: el("event-id"),
+  mergeStatus: el("merge-status"),
+  copyFinalBtn: el("copy-final-btn"),
+  downloadFinalBtn: el("download-final-btn"),
+  videoPath: el("video-path"),
+  roundFull: el("round-full"),
+  modelSet: el("model-set"),
+  detectBtn: el("detect-btn"),
+  dlUrl: el("dl-url"),
+  dlBtn: el("dl-btn"),
+  dlProgress: el("dl-progress"),
+  dlStage: el("dl-stage"),
+  dlFill: el("dl-fill"),
+  dlMsg: el("dl-msg"),
+  applyFilter: el("apply-filter"),
+  refilterBtn: el("refilter-btn"),
+  mergeSource: el("merge-source"),
+  wegoFields: el("wego-fields"),
+  tondarFields: el("tondar-fields"),
+  tondarEventNo: el("tondar-eventno"),
+  tondarLoadDatesBtn: el("tondar-load-dates-btn"),
+  tondarDate: el("tondar-date"),
+  detectProgress: el("detect-progress"),
+  progressStage: el("progress-stage"),
+  progressFill: el("progress-fill"),
+  progressMsg: el("progress-msg"),
 };
 
-const elements = {
-  youtubeUrl: document.getElementById("youtube-url"),
-  eventUrl: document.getElementById("event-url"),
-  eventDate: document.getElementById("event-date"),
-  generateFromEventBtn: document.getElementById("generate-from-event-btn"),
-  fetchStatus: document.getElementById("fetch-status"),
-  loadVideoBtn: document.getElementById("load-video-btn"),
-  currentTime: document.getElementById("current-time"),
-  recordedCount: document.getElementById("recorded-count"),
-  totalCount: document.getElementById("total-count"),
-  remainingCount: document.getElementById("remaining-count"),
-  back5Btn: document.getElementById("back-5-btn"),
-  forward5Btn: document.getElementById("forward-5-btn"),
-  togglePlayBtn: document.getElementById("toggle-play-btn"),
-  sourceText: document.getElementById("source-text"),
-  loadMatchesBtn: document.getElementById("load-matches-btn"),
-  resetProgressBtn: document.getElementById("reset-progress-btn"),
-  autoNext: document.getElementById("auto-next"),
-  prevBtn: document.getElementById("prev-btn"),
-  markBtn: document.getElementById("mark-btn"),
-  clearBtn: document.getElementById("clear-btn"),
-  nextBtn: document.getElementById("next-btn"),
-  currentMatchCard: document.getElementById("current-match-card"),
-  matchList: document.getElementById("match-list"),
-  outputText: document.getElementById("output-text"),
-  copyOutputBtn: document.getElementById("copy-output-btn"),
-  downloadOutputBtn: document.getElementById("download-output-btn"),
+const pad2 = (v) => String(v).padStart(2, "0");
+const fmtTime = (sec) => {
+  const s = Math.max(0, Math.floor(sec || 0));
+  return `${pad2(Math.floor(s / 3600))}:${pad2(Math.floor((s % 3600) / 60))}:${pad2(s % 60)}`;
 };
-
-function pad2(value) {
-  return String(value).padStart(2, "0");
+// 解析一行開頭的時間戳(HH:MM:SS / MM:SS / 秒),回傳秒或 null
+function parseLineTime(line) {
+  const m = String(line).trim().match(/^(\d{1,2}:\d{2}:\d{2}|\d{1,2}:\d{2}|\d+)/);
+  if (!m) return null;
+  const p = m[1].split(":").map((x) => parseInt(x, 10));
+  if (p.length === 3) return p[0] * 3600 + p[1] * 60 + p[2];
+  if (p.length === 2) return p[0] * 60 + p[1];
+  return p[0];
 }
-
-function formatTime(totalSeconds) {
-  const seconds = Math.max(0, Math.floor(totalSeconds || 0));
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const remain = seconds % 60;
-  return `${pad2(hours)}:${pad2(minutes)}:${pad2(remain)}`;
-}
-
 function parseVideoId(input) {
-  const trimmed = input.trim();
-  if (!trimmed) return "";
-  if (/^[a-zA-Z0-9_-]{11}$/.test(trimmed)) return trimmed;
-
+  const t = (input || "").trim();
+  if (/^[a-zA-Z0-9_-]{11}$/.test(t)) return t;
   try {
-    const url = new URL(trimmed);
-    if (url.hostname === "youtu.be") {
-      return url.pathname.replace(/^\//, "").slice(0, 11);
-    }
-    if (url.searchParams.get("v")) {
-      return url.searchParams.get("v").slice(0, 11);
-    }
+    const url = new URL(t);
+    if (url.hostname === "youtu.be") return url.pathname.replace(/^\//, "").slice(0, 11);
+    if (url.searchParams.get("v")) return url.searchParams.get("v").slice(0, 11);
     const parts = url.pathname.split("/").filter(Boolean);
-    const embedIndex = parts.findIndex((part) => ["embed", "shorts", "live"].includes(part));
-    if (embedIndex >= 0 && parts[embedIndex + 1]) {
-      return parts[embedIndex + 1].slice(0, 11);
-    }
-  } catch (_error) {
-    return "";
-  }
-
+    const i = parts.findIndex((p) => ["embed", "shorts", "live"].includes(p));
+    if (i >= 0 && parts[i + 1]) return parts[i + 1].slice(0, 11);
+  } catch (_e) { return ""; }
   return "";
 }
 
-function parseEventId(input) {
-  const trimmed = input.trim();
-  if (!trimmed) return "";
-  if (/^\d+$/.test(trimmed)) return trimmed;
-
-  try {
-    const url = new URL(trimmed);
-    const match = url.pathname.match(/\/event\/(\d+)/);
-    return match?.[1] || "";
-  } catch (_error) {
-    const match = trimmed.match(/\/event\/(\d+)/);
-    return match?.[1] || "";
-  }
+function save() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    youtubeUrl: E.youtubeUrl.value.trim(),
+    eventId: E.eventId.value.trim(),
+    videoPath: E.videoPath.value.trim(),
+    modelSet: E.modelSet ? E.modelSet.value : "combined",
+    roundFull: E.roundFull ? E.roundFull.value : "120",
+    mergeSource: E.mergeSource ? E.mergeSource.value : "wego",
+    tondarEventNo: E.tondarEventNo ? E.tondarEventNo.value.trim() : "",
+    text: E.editor.value,
+  }));
+}
+function loadSaved() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch (_e) { return null; }
 }
 
-function parseTondarEventNo(input) {
-  const trimmed = input.trim();
-  if (!trimmed) return "";
-
-  try {
-    const url = new URL(trimmed);
-    if (!url.hostname.includes(TONDAR_HOST)) return "";
-    return url.searchParams.get("EventNo") || "";
-  } catch (_error) {
-    const match = trimmed.match(/[?&]EventNo=(\d+)/i);
-    return match?.[1] || "";
-  }
+// ---- 播放器 ----
+function seekTo(sec) {
+  if (!state.playerReady || !state.player) { window.alert("請先載入影片。"); return; }
+  state.player.seekTo(sec, true); state.player.playVideo(); state.lastKnownTime = sec;
 }
-
-function detectEventSource(input) {
-  const trimmed = input.trim();
-  if (!trimmed) return { source: "unknown", eventId: "" };
-
-  const tondarEventNo = parseTondarEventNo(trimmed);
-  if (tondarEventNo) {
-    return { source: "tondar", eventId: tondarEventNo };
-  }
-
-  const wegoEventId = parseEventId(trimmed);
-  if (wegoEventId) {
-    return { source: "wego", eventId: wegoEventId };
-  }
-
-  return { source: "unknown", eventId: "" };
-}
-
-function simplifyTeamName(team) {
-  let cleaned = (team || "").trim();
-  const patterns = [
-    /^(?:臺|台)北市立/,
-    /^(?:新北|臺北|台北|新竹|基隆|台中|臺中|桃園|臺南|台南|高雄|嘉義)市立/,
-    /^(?:臺|台)北縣立/,
-    /^新竹縣立/,
-    /^屏東縣立/,
-    /^宜蘭縣立/,
-    /^花蓮縣立/,
-    /^(?:台|臺)東縣立/,
-    /^苗栗縣立/,
-    /^彰化縣立/,
-    /^南投縣立/,
-    /^雲林縣立/,
-    /^嘉義縣立/,
-    /^(?:新北|臺北|台北|新竹|基隆|台中|臺中|桃園|臺南|台南|高雄)市/,
-    /^(?:臺|台)北縣/,
-    /^基隆市/,
-    /^新竹縣/,
-    /^屏東縣/,
-    /^宜蘭縣/,
-    /^花蓮縣/,
-    /^台東縣/,
-    /^臺東縣/,
-    /^苗栗縣/,
-    /^彰化縣/,
-    /^南投縣/,
-    /^雲林縣/,
-    /^嘉義縣/,
-    /^嘉義市/,
-  ];
-  for (const pattern of patterns) {
-    cleaned = cleaned.replace(pattern, "");
-  }
-  return cleaned.trim() || (team || "").trim();
-}
-
-function simplifyCategoryName(categoryName) {
-  const text = (categoryName || "").trim();
-  let level = "";
-  if (text.includes("國中")) level = "(國)";
-  else if (text.includes("高中社會")) level = "(社高)";
-
-  const gender = text.includes("女子") ? "女子" : text.includes("男子") ? "男子" : text;
-  const match = text.match(/(\d+KG\+?|\d+KG)/);
-  const weight = match ? match[1] : "";
-  return gender && weight ? `${level}${gender}${weight}` : text;
-}
-
-function formatCompetitor(team, name, isWinner) {
-  const competitor = [simplifyTeamName(team), (name || "").trim()].filter(Boolean).join(" ");
-  return isWinner ? `${competitor} (勝)` : competitor || "資料缺漏";
-}
-
-function courtHeading(courtId) {
-  const chineseNumbers = {
-    1: "一",
-    2: "二",
-    3: "三",
-    4: "四",
-    5: "五",
-    6: "六",
-    7: "七",
-    8: "八",
-    9: "九",
-    10: "十",
-    11: "十一",
-    12: "十二",
-  };
-  return `第${chineseNumbers[courtId] || courtId}場地`;
-}
-
-function matchSortKey(matchNumber) {
-  return String(matchNumber)
-    .split("-")
-    .map((part) => {
-      const value = Number.parseInt(part, 10);
-      return Number.isNaN(value) ? 999999 : value;
-    });
-}
-
-function compareMatchSortKey(left, right) {
-  const length = Math.max(left.length, right.length);
-  for (let index = 0; index < length; index += 1) {
-    const leftValue = left[index] ?? -1;
-    const rightValue = right[index] ?? -1;
-    if (leftValue !== rightValue) return leftValue - rightValue;
-  }
-  return 0;
-}
-
-function setFetchStatus(message, tone = "") {
-  elements.fetchStatus.textContent = message;
-  elements.fetchStatus.className = tone ? `fetch-status ${tone}` : "fetch-status";
-}
-
-function setDateOptions(dates = [], preserveValue = "") {
-  const fragment = document.createDocumentFragment();
-  const defaultOption = document.createElement("option");
-  defaultOption.value = "";
-  defaultOption.textContent = "全部日期";
-  fragment.appendChild(defaultOption);
-
-  for (const date of dates) {
-    const option = document.createElement("option");
-    option.value = date;
-    option.textContent = date;
-    fragment.appendChild(option);
-  }
-
-  elements.eventDate.replaceChildren(fragment);
-  elements.eventDate.value = dates.includes(preserveValue) ? preserveValue : "";
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
-
-function describeError(error) {
-  if (!error) return "未知錯誤";
-  if (error instanceof Error && error.message) return error.message;
-  return String(error);
-}
-
-function isConnectionPoolError(error) {
-  const message = describeError(error);
-  return /connection pool exhausted|HTTP 500/i.test(message);
-}
-
-async function fetchJson(path, contextLabel = path) {
-  const response = await fetch(`${EVENT_BASE_URL}${path}`);
-  if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    const suffix = body ? ` | ${body.slice(0, 180)}` : "";
-    throw new Error(`${contextLabel} 回傳 HTTP ${response.status}${suffix}`);
-  }
-  return response.json();
-}
-
-async function fetchJsonWithRetry(path, contextLabel, maxAttempts = 3) {
-  let lastError = null;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      return await fetchJson(path, contextLabel);
-    } catch (error) {
-      lastError = error;
-      if (attempt < maxAttempts) {
-        const waitMs = isConnectionPoolError(error)
-          ? Math.min(1200 * (2 ** (attempt - 1)), 10000)
-          : 500 * attempt;
-        const waitText = (waitMs / 1000).toFixed(waitMs >= 1000 ? 1 : 0);
-        setFetchStatus(`${contextLabel} 失敗，第 ${attempt} 次重試中，等待 ${waitText} 秒...`, "pending");
-        await sleep(waitMs);
-      }
-    }
-  }
-  throw lastError;
-}
-
-async function generateSourceTextFromEvent(eventId) {
-  setFetchStatus(`正在讀取賽事 ${eventId} 的量級清單...`, "pending");
-  const categories = await fetchJsonWithRetry(
-    `/api/public/events/${eventId}/categories`,
-    `賽事 ${eventId} 量級清單`,
-    5
-  );
-
-  if (!Array.isArray(categories) || !categories.length) {
-    throw new Error(`賽事 ${eventId} 沒有可用的量級資料`);
-  }
-
-  const groupedMatches = new Map();
-  const seenMatchIds = new Set();
-
-  const schedules = [];
-  for (const [index, category] of categories.entries()) {
-    const label = category.code ? `${category.code} ${category.name}` : category.name;
-    setFetchStatus(`正在抓取量級 ${index + 1}/${categories.length}: ${label}`, "pending");
-    const schedule = await fetchJsonWithRetry(
-      `/api/public/events/${eventId}/categories/${category.id}/schedule`,
-      `量級 ${label} 賽程`,
-      5
-    );
-    schedules.push({ categoryName: category.name, data: schedule.data || [] });
-    await sleep(650);
-  }
-
-  for (const schedule of schedules) {
-    for (const match of schedule.data) {
-      const matchId = String(match.match_id || "").trim();
-      const matchNumber = match.matchnumber;
-      const courtId = match.courtid;
-      const player1Id = match.player1_id;
-      const player2Id = match.player2_id;
-      const winnerId = match.winner_id;
-
-      if (!matchId || seenMatchIds.has(matchId)) continue;
-      if (courtId === null || courtId === undefined || matchNumber === null || matchNumber === undefined || matchNumber === "") continue;
-      if (player1Id === "BYE" || player2Id === "BYE") continue;
-
-      seenMatchIds.add(matchId);
-      const courtKey = Number(courtId);
-      if (!groupedMatches.has(courtKey)) groupedMatches.set(courtKey, []);
-      groupedMatches.get(courtKey).push({
-        matchNumber: String(matchNumber),
-        sortKey: matchSortKey(matchNumber),
-        left: formatCompetitor(match.p1_team, match.p1_display, winnerId === player1Id),
-        right: formatCompetitor(match.p2_team, match.p2_display, winnerId === player2Id),
-        categoryName: simplifyCategoryName(schedule.categoryName),
-        round: match.round || "",
-      });
-    }
-  }
-
-  const sortedCourts = [...groupedMatches.entries()].sort((left, right) => left[0] - right[0]);
-  const lines = [];
-  for (const [courtId, matches] of sortedCourts) {
-    if (lines.length) lines.push("");
-    lines.push(courtHeading(courtId));
-    matches.sort((left, right) => compareMatchSortKey(left.sortKey, right.sortKey));
-    for (const match of matches) {
-      lines.push(`${match.matchNumber} ${match.left} vs ${match.right} | ${match.categoryName} | ${match.round}`);
-    }
-  }
-
-  setFetchStatus(`抓取完成，共 ${lines.filter((line) => /^\d/.test(line)).length} 場。`, "success");
-  return `${lines.join("\n")}\n`;
-}
-
-async function generateSourceTextFromTondar(eventNo, dateValue) {
-  const query = new URLSearchParams({ eventNo });
-  if (dateValue) query.set("date", dateValue);
-
-  setFetchStatus(`正在透過代理抓取全中運賽程 EventNo=${eventNo}${dateValue ? `，日期 ${dateValue}` : ""}...`, "pending");
-  const response = await fetch(`/api/tondar-schedule?${query.toString()}`);
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    const message = payload?.error || `API 回傳 HTTP ${response.status}`;
-    if (response.status === 404 && window.location.protocol === "http:") {
-      throw new Error(`${message}。若你是在本機用 python3 -m http.server 啟動，這個模式不支援 /api 代理；請改用部署後網址或 vercel dev。`);
-    }
-    throw new Error(message);
-  }
-
-  setFetchStatus(`抓取完成，共 ${payload.matchCount || 0} 場。`, "success");
-  return payload.sourceText || "";
-}
-
-async function loadTondarDates(eventNo) {
-  const response = await fetch(`/api/tondar-schedule?mode=dates&eventNo=${encodeURIComponent(eventNo)}`);
-  const payload = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    const message = payload?.error || `API 回傳 HTTP ${response.status}`;
-    if (response.status === 404 && window.location.protocol === "http:") {
-      throw new Error(`${message}。若你是在本機用 python3 -m http.server 啟動，這個模式不支援 /api 代理；請改用部署後網址或 vercel dev。`);
-    }
-    throw new Error(message);
-  }
-
-  return Array.isArray(payload.dates) ? payload.dates : [];
-}
-
-async function refreshEventDateOptions() {
-  const { source, eventId } = detectEventSource(elements.eventUrl.value);
-  const preservedValue = elements.eventDate.value;
-
-  if (source !== "tondar" || !eventId) {
-    setDateOptions([], "");
-    saveState();
-    return;
-  }
-
-  setFetchStatus(`正在讀取全中運 EventNo=${eventId} 的可選日期...`, "pending");
-  try {
-    const dates = await loadTondarDates(eventId);
-    setDateOptions(dates, preservedValue);
-    setFetchStatus(`已載入 ${dates.length} 個可選日期。`, "success");
-  } catch (error) {
-    setDateOptions([], "");
-    const message = describeError(error);
-    setFetchStatus(`日期載入失敗：${message}`, "error");
-  } finally {
-    saveState();
-  }
-}
-
-function buildMatchKey(match) {
-  return `${match.court}|${match.matchNumber}|${match.description}`;
-}
-
-function parseMatches(text, savedTimestamps = {}) {
-  const lines = text.split(/\r?\n/);
-  const matches = [];
-  let currentCourt = "";
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    if (/場地$/.test(line)) {
-      currentCourt = line;
-      continue;
-    }
-
-    const withTimestamp = line.match(/^(\d{2}:\d{2}:\d{2})\s+(.+)$/);
-    const timestamp = withTimestamp ? withTimestamp[1] : "";
-    const content = withTimestamp ? withTimestamp[2] : line;
-    const parts = content.split(/\s+/);
-    const matchNumber = parts.shift() || "";
-    const description = content.slice(matchNumber.length).trim();
-    const detailParts = description.split(" | ");
-
-    const match = {
-      court: currentCourt,
-      matchNumber,
-      description,
-      players: detailParts[0] || description,
-      shortMeta: detailParts.slice(1).join(" | "),
-      timestamp: timestamp || savedTimestamps[`${currentCourt}|${matchNumber}|${description}`] || "",
-    };
-    matches.push(match);
-  }
-
-  return matches;
-}
-
-function renderCurrentMatch() {
-  const match = state.matches[state.selectedIndex];
-  if (!match) {
-    elements.currentMatchCard.classList.add("empty");
-    elements.currentMatchCard.textContent = "尚未載入場次";
-    return;
-  }
-
-  elements.currentMatchCard.classList.remove("empty");
-  elements.currentMatchCard.innerHTML = `
-    <div><strong>${match.court}</strong></div>
-    <div><strong>${match.matchNumber}</strong> ${match.players}</div>
-    <div>${match.shortMeta || ""}</div>
-    <div class="timestamp ${match.timestamp ? "" : "pending"}">目前記錄：${match.timestamp || "尚未標記"}</div>
-  `;
-}
-
-function renderMatchList() {
-  const items = state.matches.map((match, index) => {
-    const isActive = index === state.selectedIndex;
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = `match-item ${isActive ? "active" : ""} ${match.timestamp ? "recorded" : "pending"}`;
-    item.innerHTML = `
-      <div class="match-item-header">
-        <span>${match.matchNumber}</span>
-        <span class="timestamp ${match.timestamp ? "" : "pending"}">${match.timestamp || "未標記"}</span>
-      </div>
-      <div>${match.players}</div>
-      <div class="match-meta">${match.court} | ${match.shortMeta || ""}</div>
-    `;
-    item.addEventListener("click", () => {
-      state.selectedIndex = index;
-      updateUi();
-      saveState();
-    });
-    return item;
-  });
-
-  elements.matchList.replaceChildren(...items);
-}
-
-function buildOutputText() {
-  const grouped = new Map();
-  for (const match of state.matches) {
-    if (!grouped.has(match.court)) grouped.set(match.court, []);
-    grouped.get(match.court).push(match);
-  }
-
-  const lines = [];
-  for (const [court, matches] of grouped.entries()) {
-    if (lines.length) lines.push("");
-    lines.push(court);
-    for (const match of matches) {
-      const prefix = match.timestamp ? `${match.timestamp} ` : "";
-      lines.push(`${prefix}${match.matchNumber} ${match.description}`);
-    }
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-function updateStats() {
-  const recorded = state.matches.filter((match) => match.timestamp).length;
-  const total = state.matches.length;
-  elements.recordedCount.textContent = String(recorded);
-  elements.totalCount.textContent = String(total);
-  elements.remainingCount.textContent = String(total - recorded);
-}
-
-function updateUi() {
-  elements.currentTime.textContent = formatTime(state.lastKnownTime);
-  renderCurrentMatch();
-  renderMatchList();
-  updateStats();
-  elements.outputText.value = buildOutputText();
-}
-
-function saveState() {
-  const timestamps = {};
-  for (const match of state.matches) {
-    if (match.timestamp) timestamps[buildMatchKey(match)] = match.timestamp;
-  }
-  const payload = {
-    videoInput: elements.youtubeUrl.value.trim(),
-    eventInput: elements.eventUrl.value.trim(),
-    eventDateInput: elements.eventDate.value.trim(),
-    sourceText: elements.sourceText.value,
-    selectedIndex: state.selectedIndex,
-    timestamps,
-    autoNext: elements.autoNext.checked,
-  };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-}
-
-function restoreState() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-  } catch (_error) {
-    return null;
-  }
-}
-
-function loadMatchesFromText() {
-  const sourceText = elements.sourceText.value.trim();
-  const restored = restoreState();
-  const savedTimestamps = restored?.timestamps || {};
-  state.sourceText = sourceText;
-  state.matches = parseMatches(sourceText, savedTimestamps);
-  state.selectedIndex = Math.min(restored?.selectedIndex || 0, Math.max(state.matches.length - 1, 0));
-  updateUi();
-  saveState();
-}
-
-function selectRelative(step) {
-  if (!state.matches.length) return;
-  state.selectedIndex = Math.max(0, Math.min(state.matches.length - 1, state.selectedIndex + step));
-  updateUi();
-  saveState();
-}
-
-function markCurrentMatch() {
-  if (!state.matches.length) return;
-  const match = state.matches[state.selectedIndex];
-  match.timestamp = formatTime(state.lastKnownTime);
-  updateUi();
-  saveState();
-  if (elements.autoNext.checked) {
-    selectRelative(1);
-  }
-}
-
-function clearCurrentMatch() {
-  if (!state.matches.length) return;
-  state.matches[state.selectedIndex].timestamp = "";
-  updateUi();
-  saveState();
-}
-
-function copyOutput() {
-  navigator.clipboard.writeText(elements.outputText.value).then(() => {
-    elements.copyOutputBtn.textContent = "已複製";
-    setTimeout(() => {
-      elements.copyOutputBtn.textContent = "複製結果";
-    }, 1200);
-  });
-}
-
-function downloadOutput() {
-  const blob = new Blob([elements.outputText.value], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = "TKDFightStamp-timestamps.txt";
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
-function seekBy(delta) {
+function seekBy(d) {
   if (!state.playerReady || !state.player) return;
-  const next = Math.max(0, state.player.getCurrentTime() + delta);
-  state.player.seekTo(next, true);
-  state.lastKnownTime = next;
-  updateUi();
+  const n = Math.max(0, state.player.getCurrentTime() + d);
+  state.player.seekTo(n, true); state.lastKnownTime = n;
 }
-
 function togglePlay() {
   if (!state.playerReady || !state.player) return;
-  const status = state.player.getPlayerState();
-  if (status === YT.PlayerState.PLAYING) {
-    state.player.pauseVideo();
-  } else {
-    state.player.playVideo();
-  }
+  const st = state.player.getPlayerState();
+  if (st === YT.PlayerState.PLAYING) state.player.pauseVideo(); else state.player.playVideo();
 }
-
+let pendingVideoId = null;   // YT API 還沒好時,先記住要載入的影片
 function createOrLoadPlayer(videoId) {
-  if (!videoId) {
-    window.alert("請輸入有效的 YouTube 影片網址或影片 ID。");
-    return;
-  }
-
-  if (!window.YT || !window.YT.Player) {
-    window.alert("YouTube 播放器仍在載入，請稍候再試一次。");
-    return;
-  }
-
-  state.videoInput = elements.youtubeUrl.value.trim();
-
-  if (state.player) {
-    state.player.loadVideoById(videoId);
-    saveState();
-    return;
-  }
-
+  if (!videoId) { window.alert("請輸入有效的 YouTube 網址或 ID。"); return; }
+  // YT API 還沒載完 → 記住,等 onYouTubeIframeAPIReady 再建
+  if (!window.YT || !window.YT.Player) { pendingVideoId = videoId; return; }
+  if (state.player && state.player.loadVideoById) { state.player.loadVideoById(videoId); save(); return; }
   state.player = new YT.Player("player-frame", {
     videoId,
-    playerVars: {
-      rel: 0,
-      modestbranding: 1,
-    },
+    playerVars: { rel: 0, modestbranding: 1 },
     events: {
-      onReady: () => {
-        state.playerReady = true;
-      },
-      onStateChange: () => {
-        if (state.player && state.player.getCurrentTime) {
-          state.lastKnownTime = state.player.getCurrentTime();
-          updateUi();
-        }
-      },
+      onReady: () => { state.playerReady = true; },
+      onError: (e) => { E.candidateStatus.textContent = "影片載入錯誤 code=" + e.data + "(可能不允許嵌入或影片私人)"; },
+      onStateChange: () => { if (state.player?.getCurrentTime) state.lastKnownTime = state.player.getCurrentTime(); },
     },
   });
-  saveState();
+  save();
 }
 
-window.onYouTubeIframeAPIReady = function onYouTubeIframeAPIReady() {
-  const restored = restoreState();
-  if (restored?.videoInput) {
-    elements.youtubeUrl.value = restored.videoInput;
-    const videoId = parseVideoId(restored.videoInput);
-    if (videoId) createOrLoadPlayer(videoId);
-  }
-};
+// ---- 文字編輯器工具 ----
+function currentLineInfo() {
+  // 回傳 {lineIndex, lineStart, lineEnd, lineText} 依游標位置
+  const ta = E.editor;
+  const pos = ta.selectionStart;
+  const text = ta.value;
+  const before = text.slice(0, pos);
+  const lineStart = before.lastIndexOf("\n") + 1;
+  let lineEnd = text.indexOf("\n", pos);
+  if (lineEnd === -1) lineEnd = text.length;
+  const lineIndex = before.split("\n").length - 1;
+  return { lineIndex, lineStart, lineEnd, lineText: text.slice(lineStart, lineEnd) };
+}
+function jumpToCurrentLine() {
+  const { lineText } = currentLineInfo();
+  const s = parseLineTime(lineText);
+  if (s == null) { E.lineStatus.textContent = "本行無可解析的時間戳"; return; }
+  E.lineStatus.textContent = `跳到 ${fmtTime(s)}`;
+  seekTo(s);
+}
+function insertNowLine() {
+  if (!state.playerReady || !state.player) { window.alert("請先載入影片。"); return; }
+  const t = Math.floor(state.player.getCurrentTime());
+  const ta = E.editor;
+  const text = ta.value;
+  // 在游標所在行的「行尾」後插入新行
+  const { lineEnd } = currentLineInfo();
+  const insert = `\n${fmtTime(t)}\t`;
+  ta.value = text.slice(0, lineEnd) + insert + text.slice(lineEnd);
+  // 游標移到新行末(場次待填)
+  const newPos = lineEnd + insert.length;
+  ta.focus(); ta.setSelectionRange(newPos, newPos);
+  save(); updateLineCount();
+}
+function updateLineCount() {
+  const lines = E.editor.value.split("\n").filter((l) => l.trim());
+  E.lineStatus.textContent = `${lines.length} 行`;
+}
 
-async function bootstrapSourceText() {
-  const restored = restoreState();
-  if (restored?.sourceText) {
-    elements.sourceText.value = restored.sourceText;
-    elements.eventUrl.value = restored.eventInput || "";
-    setDateOptions([], restored.eventDateInput || "");
-    elements.autoNext.checked = restored.autoNext !== false;
-    loadMatchesFromText();
-    if (detectEventSource(elements.eventUrl.value).source === "tondar") {
-      refreshEventDateOptions();
-    }
-    return;
-  }
-
+// ---- 載入 AI 候選 ----
+async function loadCandidates() {
+  E.candidateStatus.textContent = "載入中...";
   try {
-    const response = await fetch(DEFAULT_SOURCE_FILE);
-    if (!response.ok) throw new Error("fetch failed");
-    const text = await response.text();
-    elements.sourceText.value = text;
-    loadMatchesFromText();
-  } catch (_error) {
-    elements.sourceText.value = "";
-    updateUi();
+    const r = await fetch("./candidates.json?t=" + Date.now());
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const data = await r.json();
+    const lines = (data.candidates || [])
+      .slice().sort((a, b) => a.t_sec - b.t_sec)
+      .map((c) => `${fmtTime(c.t_sec)}\t${c.matchnum || ""}`);
+    // 若編輯器已有內容,問是否覆蓋
+    if (E.editor.value.trim() && !window.confirm("編輯器已有內容,要用 AI 候選覆蓋嗎?(取消則附加在後面)")) {
+      E.editor.value += "\n" + lines.join("\n");
+    } else {
+      E.editor.value = lines.join("\n");
+    }
+    if (data.youtube_url && !E.youtubeUrl.value.trim()) {
+      E.youtubeUrl.value = data.youtube_url;
+      const vid = parseVideoId(data.youtube_url);
+      if (vid) createOrLoadPlayer(vid);
+    }
+    save(); updateLineCount();
+    E.candidateStatus.textContent = `已載入 ${lines.length} 場`;
+  } catch (e) {
+    E.candidateStatus.textContent = "載入失敗:" + e.message + "(需用本機伺服器開啟)";
   }
 }
 
-function handleKeyboard(event) {
+// ---- 事件 ----
+E.loadVideoBtn.addEventListener("click", () => createOrLoadPlayer(parseVideoId(E.youtubeUrl.value)));
+E.back5Btn.addEventListener("click", () => seekBy(-SEEK_SECONDS));
+E.forward5Btn.addEventListener("click", () => seekBy(SEEK_SECONDS));
+E.togglePlayBtn.addEventListener("click", togglePlay);
+E.loadCandidatesBtn.addEventListener("click", loadCandidates);
+E.jumpLineBtn.addEventListener("click", jumpToCurrentLine);
+E.insertNowBtn.addEventListener("click", insertNowLine);
+E.editor.addEventListener("input", () => { save(); updateLineCount(); });
+E.editor.addEventListener("click", () => {
+  const { lineText } = currentLineInfo();
+  const s = parseLineTime(lineText);
+  E.lineStatus.textContent = s != null ? `本行 ${fmtTime(s)}(可按「跳到本行時間」)` : "本行無時間戳";
+});
+E.youtubeUrl.addEventListener("change", save);
+E.eventId.addEventListener("change", save);
+E.videoPath.addEventListener("change", save);
+E.detectBtn.addEventListener("click", startDetect);
+if (E.dlBtn) E.dlBtn.addEventListener("click", startDownload);
+if (E.refilterBtn) E.refilterBtn.addEventListener("click", startRefilter);
+E.copyBtn.addEventListener("click", () => {
+  navigator.clipboard.writeText(E.editor.value).then(() => {
+    const o = E.copyBtn.textContent; E.copyBtn.textContent = "已複製"; setTimeout(() => (E.copyBtn.textContent = o), 1200);
+  });
+});
+// ---- 下載 YouTube 影片(呼叫後端 yt-dlp + 輪詢進度)----
+let dlTimer = null;
+async function startDownload() {
+  const url = E.dlUrl.value.trim();
+  if (!url) { E.dlStage.textContent = "請填 YouTube 網址"; E.dlProgress.style.display = "block"; return; }
+  E.dlBtn.disabled = true;
+  E.dlProgress.style.display = "block";
+  E.dlStage.textContent = "啟動下載...";
+  E.dlFill.style.width = "0%";
+  E.dlMsg.textContent = "";
+  try {
+    const r = await fetch("/api/download", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url }),
+    });
+    const d = await r.json();
+    if (!d.ok) { E.dlStage.textContent = "無法開始:" + d.error; E.dlBtn.disabled = false; return; }
+    pollDownload();
+  } catch (e) {
+    E.dlStage.textContent = "下載請求失敗:" + e.message;
+    E.dlBtn.disabled = false;
+  }
+}
+function pollDownload() {
+  if (dlTimer) clearInterval(dlTimer);
+  dlTimer = setInterval(async () => {
+    try {
+      const d = await (await fetch("/api/dl_progress?t=" + Date.now())).json();
+      E.dlStage.textContent = d.running ? "下載中..." : (d.done ? "" : "處理中...");
+      E.dlFill.style.width = (d.percent || 0) + "%";
+      E.dlMsg.textContent = d.msg || "";
+      if (d.done) {
+        clearInterval(dlTimer); dlTimer = null;
+        E.dlBtn.disabled = false;
+        if (d.error) {
+          E.dlStage.textContent = "下載失敗";
+          E.dlMsg.textContent = d.error.slice(0, 300);
+        } else {
+          E.dlStage.textContent = "下載完成 ✓";
+          E.dlFill.style.width = "100%";
+          // 路徑自動填入偵測欄
+          if (d.path) { E.videoPath.value = d.path; save(); }
+          E.dlMsg.textContent = "已存到:" + (d.path || "") + " —— 可直接按「開始偵測」";
+        }
+      }
+    } catch (e) { /* 輪詢暫時失敗,下次再試 */ }
+  }, 2000);
+}
+// ---- 偵測(呼叫後端 pipeline + 輪詢進度)----
+let pollTimer = null;
+async function startDetect() {
+  const video = E.videoPath.value.trim();
+  if (!video) { E.progressStage.textContent = "請填本機影片路徑"; E.detectProgress.style.display = "block"; return; }
+  const roundFull = E.roundFull.value;
+  const modelSet = E.modelSet ? E.modelSet.value : "combined";
+  const applyFilter = E.applyFilter ? E.applyFilter.checked : true;
+  E.detectBtn.disabled = true;
+  E.detectProgress.style.display = "block";
+  E.progressStage.textContent = "啟動偵測...";
+  E.progressFill.style.width = "0%";
+  E.progressMsg.textContent = "";
+  try {
+    const r = await fetch("/api/detect", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ video, round_full: roundFull, model_set: modelSet, apply_filter: applyFilter }),
+    });
+    const d = await r.json();
+    if (!d.ok) { E.progressStage.textContent = "無法開始:" + d.error; E.detectBtn.disabled = false; return; }
+    pollProgress();
+  } catch (e) {
+    E.progressStage.textContent = "偵測請求失敗:" + e.message;
+    E.detectBtn.disabled = false;
+  }
+}
+// ---- 重新過濾(不重掃,只用上次掃描交界重跑 finalize+OCR)----
+async function startRefilter() {
+  const modelSet = E.modelSet ? E.modelSet.value : "combined";
+  const applyFilter = E.applyFilter ? E.applyFilter.checked : true;
+  const video = E.videoPath.value.trim();
+  E.refilterBtn.disabled = true; E.detectBtn.disabled = true;
+  E.detectProgress.style.display = "block";
+  E.progressStage.textContent = "重新過濾中(不重掃)...";
+  E.progressFill.style.width = "0%"; E.progressMsg.textContent = "";
+  try {
+    const r = await fetch("/api/refilter", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model_set: modelSet, apply_filter: applyFilter, video }),
+    });
+    const d = await r.json();
+    if (!d.ok) {
+      E.progressStage.textContent = "無法重新過濾:" + d.error;
+      E.refilterBtn.disabled = false; E.detectBtn.disabled = false; return;
+    }
+    pollProgress(() => { E.refilterBtn.disabled = false; });
+  } catch (e) {
+    E.progressStage.textContent = "重新過濾請求失敗:" + e.message;
+    E.refilterBtn.disabled = false; E.detectBtn.disabled = false;
+  }
+}
+function pollProgress(onDone) {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    try {
+      const d = await (await fetch("/api/progress?t=" + Date.now())).json();
+      E.progressStage.textContent = d.stage || "處理中...";
+      E.progressFill.style.width = (d.percent || 0) + "%";
+      E.progressMsg.textContent = d.msg || "";
+      if (d.done) {
+        clearInterval(pollTimer); pollTimer = null;
+        E.detectBtn.disabled = false;
+        if (typeof onDone === "function") onDone();
+        if (d.error) {
+          E.progressStage.textContent = "失敗";
+          E.progressMsg.textContent = d.error.slice(0, 300);
+        } else {
+          E.progressStage.textContent = "完成 ✓";
+          E.progressFill.style.width = "100%";
+          // 結果(時間戳+場次)填入編輯器
+          if (d.result) {
+            const lines = d.result.split("\n").filter((l) => l.trim() && !l.startsWith("時間戳"));
+            E.editor.value = lines.join("\n");
+            updateLineCount(); save();
+          } else {
+            E.progressMsg.textContent = "(結果 0 筆 —— 可取消「套用第一回合過濾」再按「重新過濾」拿全部交界)";
+          }
+        }
+      }
+    } catch (e) { /* 輪詢暫時失敗,下次再試 */ }
+  }, 2000);
+}
+
+function parseEventId(input) {
+  const t = (input || "").trim();
+  if (/^\d+$/.test(t)) return t;
+  const m = t.match(/\/event\/(\d+)/);
+  return m ? m[1] : "";
+}
+// tondar:從「18」或整個 ScheduleC 網址取 EventNo
+function parseTondarEventNo(input) {
+  const t = (input || "").trim();
+  if (/^\d+$/.test(t)) return t;
+  const m = t.match(/EventNo=(\d+)/i);
+  return m ? m[1] : "";
+}
+// 對戰表來源切換(wego / tondar)
+function syncMergeSource() {
+  const src = E.mergeSource ? E.mergeSource.value : "wego";
+  if (E.wegoFields) E.wegoFields.style.display = src === "wego" ? "" : "none";
+  if (E.tondarFields) E.tondarFields.style.display = src === "tondar" ? "" : "none";
+  save();
+}
+if (E.mergeSource) E.mergeSource.addEventListener("change", syncMergeSource);
+
+// tondar:載入該賽事的比賽日期到下拉選單
+if (E.tondarLoadDatesBtn) E.tondarLoadDatesBtn.addEventListener("click", async () => {
+  const eventNo = parseTondarEventNo(E.tondarEventNo.value);
+  if (!eventNo) { E.mergeStatus.textContent = "請填 tondar EventNo"; return; }
+  E.mergeStatus.textContent = "載入日期中...";
+  try {
+    const r = await fetch("/api/tondar_dates", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event_no: eventNo }),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || "未知錯誤");
+    E.tondarDate.innerHTML = "";
+    (d.dates || []).forEach((dte) => {
+      const o = document.createElement("option");
+      o.value = dte; o.textContent = tondarDateLabel(dte);
+      E.tondarDate.appendChild(o);
+    });
+    E.mergeStatus.textContent = `已載入 ${(d.dates || []).length} 個日期`;
+    save();
+  } catch (e) {
+    E.mergeStatus.textContent = "載入日期失敗:" + e.message;
+  }
+});
+// 民國日期 1150512 → 115/05/12
+function tondarDateLabel(dte) {
+  const s = String(dte);
+  if (s.length === 7) return `${s.slice(0, 3)}/${s.slice(3, 5)}/${s.slice(5, 7)}`;
+  return s;
+}
+
+E.buildFinalBtn.addEventListener("click", async () => {
+  if (!E.editor.value.trim()) { E.mergeStatus.textContent = "上方清單是空的"; return; }
+  const src = E.mergeSource ? E.mergeSource.value : "wego";
+  let body;
+  if (src === "tondar") {
+    const eventNo = parseTondarEventNo(E.tondarEventNo.value);
+    const edte = E.tondarDate.value;
+    if (!eventNo) { E.mergeStatus.textContent = "請填 tondar EventNo"; return; }
+    if (!edte) { E.mergeStatus.textContent = "請先「載入日期」並選一天"; return; }
+    body = { source: "tondar", event_no: eventNo, edte, text: E.editor.value };
+  } else {
+    const eventId = parseEventId(E.eventId.value);
+    if (!eventId) { E.mergeStatus.textContent = "請填入賽事 event 網址或 ID"; return; }
+    body = { source: "wego", event_id: eventId, text: E.editor.value };
+  }
+  E.mergeStatus.textContent = "補齊中(爬對戰表)...";
+  try {
+    const r = await fetch("/api/merge", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || "未知錯誤");
+    E.finalOutput.value = d.result;
+    E.mergeStatus.textContent = "完成 ✓";
+    save();
+  } catch (e) {
+    E.mergeStatus.textContent = "補齊失敗:" + e.message + "(需用 serve.py 啟動,非 http.server)";
+  }
+});
+E.copyFinalBtn.addEventListener("click", () => {
+  navigator.clipboard.writeText(E.finalOutput.value).then(() => {
+    const o = E.copyFinalBtn.textContent; E.copyFinalBtn.textContent = "已複製"; setTimeout(() => (E.copyFinalBtn.textContent = o), 1200);
+  });
+});
+E.downloadFinalBtn.addEventListener("click", () => {
+  const blob = new Blob([E.finalOutput.value], { type: "text/plain;charset=utf-8" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "youtube-chapters.txt"; a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+// 快捷鍵(游標不在輸入框/文字框時)
+document.addEventListener("keydown", (e) => {
   const tag = document.activeElement?.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA") return;
-
-  if (event.code === "Space") {
-    event.preventDefault();
-    togglePlay();
-  }
-  if (event.key === "n" || event.key === "N") {
-    event.preventDefault();
-    markCurrentMatch();
-  }
-  if (event.key === "p" || event.key === "P") {
-    event.preventDefault();
-    selectRelative(-1);
-  }
-  if (event.key === "j" || event.key === "J") {
-    event.preventDefault();
-    seekBy(-SEEK_SECONDS);
-  }
-  if (event.key === "l" || event.key === "L") {
-    event.preventDefault();
-    seekBy(SEEK_SECONDS);
-  }
-}
-
-elements.loadVideoBtn.addEventListener("click", () => {
-  createOrLoadPlayer(parseVideoId(elements.youtubeUrl.value));
+  if (e.code === "Space") { e.preventDefault(); togglePlay(); }
+  if (e.key === "j" || e.key === "J") seekBy(-SEEK_SECONDS);
+  if (e.key === "l" || e.key === "L") seekBy(SEEK_SECONDS);
 });
-elements.generateFromEventBtn.addEventListener("click", async () => {
-  const { source, eventId } = detectEventSource(elements.eventUrl.value);
-  if (!eventId) {
-    setFetchStatus("請輸入有效的賽事網址，例如 wego event 頁或全中運 ScheduleC.php?EventNo=10", "error");
-    window.alert("請輸入有效的賽事網址，例如 https://wego-tkd-web.onrender.com/event/3 或 https://www.tondar-cn.com/Competition/ScheduleC.php?EventNo=10");
-    return;
-  }
-
-  const originalLabel = elements.generateFromEventBtn.textContent;
-  elements.generateFromEventBtn.disabled = true;
-  elements.generateFromEventBtn.textContent = "抓取中...";
-  try {
-    const dateValue = elements.eventDate.value.trim();
-    const sourceText = source === "tondar"
-      ? await generateSourceTextFromTondar(eventId, dateValue)
-      : await generateSourceTextFromEvent(eventId);
-    elements.sourceText.value = sourceText;
-    loadMatchesFromText();
-  } catch (error) {
-    console.error(error);
-    const message = describeError(error);
-    setFetchStatus(`抓取失敗：${message}`, "error");
-    window.alert(`抓取對戰表失敗\n\n${message}`);
-  } finally {
-    elements.generateFromEventBtn.disabled = false;
-    elements.generateFromEventBtn.textContent = originalLabel;
-    saveState();
-  }
-});
-elements.back5Btn.addEventListener("click", () => seekBy(-SEEK_SECONDS));
-elements.forward5Btn.addEventListener("click", () => seekBy(SEEK_SECONDS));
-elements.togglePlayBtn.addEventListener("click", togglePlay);
-elements.loadMatchesBtn.addEventListener("click", loadMatchesFromText);
-elements.resetProgressBtn.addEventListener("click", () => {
-  if (!window.confirm("確定要清空所有已記錄的時間戳嗎？")) return;
-  state.matches = state.matches.map((match) => ({ ...match, timestamp: "" }));
-  state.selectedIndex = 0;
-  updateUi();
-  saveState();
-});
-elements.prevBtn.addEventListener("click", () => selectRelative(-1));
-elements.markBtn.addEventListener("click", markCurrentMatch);
-elements.clearBtn.addEventListener("click", clearCurrentMatch);
-elements.nextBtn.addEventListener("click", () => selectRelative(1));
-elements.copyOutputBtn.addEventListener("click", copyOutput);
-elements.downloadOutputBtn.addEventListener("click", downloadOutput);
-elements.sourceText.addEventListener("change", saveState);
-elements.eventUrl.addEventListener("change", refreshEventDateOptions);
-elements.eventDate.addEventListener("change", saveState);
-elements.youtubeUrl.addEventListener("change", saveState);
-elements.autoNext.addEventListener("change", saveState);
-document.addEventListener("keydown", handleKeyboard);
 
 setInterval(() => {
-  if (!state.playerReady || !state.player || !state.player.getCurrentTime) return;
-  state.lastKnownTime = state.player.getCurrentTime();
-  elements.currentTime.textContent = formatTime(state.lastKnownTime);
+  if (state.playerReady && state.player?.getCurrentTime) {
+    state.lastKnownTime = state.player.getCurrentTime();
+    E.currentTime.textContent = fmtTime(state.lastKnownTime);
+  }
 }, 300);
 
-bootstrapSourceText();
+// 啟動還原(頁面載入時先跑,不等 YT API)
+(function restore() {
+  const saved = loadSaved();
+  if (saved) {
+    if (saved.text) { E.editor.value = saved.text; updateLineCount(); }
+    if (saved.youtubeUrl) E.youtubeUrl.value = saved.youtubeUrl;
+    if (saved.eventId) E.eventId.value = saved.eventId;
+    if (saved.videoPath) E.videoPath.value = saved.videoPath;
+    if (saved.modelSet && E.modelSet) E.modelSet.value = saved.modelSet;
+    if (saved.roundFull && E.roundFull) E.roundFull.value = saved.roundFull;
+    if (saved.mergeSource && E.mergeSource) E.mergeSource.value = saved.mergeSource;
+    if (saved.tondarEventNo && E.tondarEventNo) E.tondarEventNo.value = saved.tondarEventNo;
+  }
+  syncMergeSource();  // 依還原的來源顯示對應欄位
+})();
+
+// YT API 就緒 → 建立播放器(消化 pending,或還原上次的網址)
+window.onYouTubeIframeAPIReady = function () {
+  let vid = pendingVideoId;
+  if (!vid) {
+    const u = E.youtubeUrl.value.trim();
+    if (u) vid = parseVideoId(u);
+  }
+  if (vid) { pendingVideoId = null; createOrLoadPlayer(vid); }
+};

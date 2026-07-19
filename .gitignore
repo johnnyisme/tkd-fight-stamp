@@ -1,3 +1,40 @@
+# ---- 原有 ----
 .DS_Store
 .vercel/
 *.log
+
+# ---- Python venv / 快取(數 GB,絕不進版控)----
+detector/.venv/
+**/__pycache__/
+*.pyc
+
+# ---- 影片 / 音檔(數 GB)----
+*.mp4
+*.mkv
+*.mov
+*.wav
+*.m4a
+*.part
+
+# ---- 大型第三方預訓練模型(自動下載,不進版控;自己訓的在 detector/runs/ 才留)----
+/weights/
+detector/yolo11n.pt
+detector/yolo11n-cls.pt
+detector/yolov8*.pt
+detector/yolo11*.pt
+
+# ---- pipeline 產物 / 抽出的幀(可重生)----
+detector/out/
+detector/frames/
+detector/work/
+
+# ---- 訓練資料集(原始標註幀,重訓才需要;數百張 jpg,不進版控保持 repo 輕)----
+# 只留訓練好的模型 detector/runs/,要重訓的人自己抽幀標註。
+detector/dataset/
+detector/dataset_*/
+
+# ---- 本機執行狀態 ----
+candidates.json
+candidates_*.json
+temp.txt
+.backup_before_redesign/
