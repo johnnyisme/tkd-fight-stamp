@@ -195,7 +195,7 @@ def refilter_pipeline(model_set, apply_filter, video=""):
 
 
 def _ts_to_sec(ts):
-    p = [int(x) for x in ts.split(":")]
+    p = [int(x) for x in ts.rstrip("~").split(":")]  # 容忍 approx 標記 ~
     if len(p) == 3:
         return p[0] * 3600 + p[1] * 60 + p[2]
     if len(p) == 2:
@@ -291,7 +291,7 @@ def merge_list(event_id, text):
         if not line or line.startswith("時間戳"):
             continue
         parts = re.split(r"[\s\t]+", line, maxsplit=1)
-        ts = parts[0]
+        ts = parts[0].rstrip("~")  # 去掉 approx 粗估標記,最終輸出乾淨時間戳
         num = parts[1].strip() if len(parts) > 1 else ""
         out.append(format_line(ts, num, idx.get(num) if num else None))
     return "\n".join(out)
@@ -367,7 +367,7 @@ def tondar_merge_list(event_no, edte, text):
         if not line or line.startswith("時間戳"):
             continue
         parts = re.split(r"[\s\t]+", line, maxsplit=1)
-        ts = parts[0]
+        ts = parts[0].rstrip("~")  # 去掉 approx 粗估標記,最終輸出乾淨時間戳
         num = parts[1].strip() if len(parts) > 1 else ""
         out.append(tondar_format_line(ts, num, idx.get(num) if num else None))
     return "\n".join(out)

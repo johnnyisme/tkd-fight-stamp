@@ -91,8 +91,11 @@ def main():
         ct = c["t_sec"]
         num, votes = vote_matchnum(video, ct)
         ts = c["timestamp"]
-        lines.append(f"{ts}\t{num}")
-        print(f"{ts}\t{num or '(讀不到)'}\t投票={votes}", flush=True)
+        # approx(遞減回推)落點粗估,時間戳後緊黏「~」提示複審重點對時間
+        # (黏緊不加空格,才不會被下游 split 當成場次號)
+        mark = "~" if c.get("approx") else ""
+        lines.append(f"{ts}{mark}\t{num}")
+        print(f"{ts}{mark}\t{num or '(讀不到)'}\t投票={votes}", flush=True)
         if i % 5 == 0 or i == total:
             el = _time.time() - t0
             eta = (total - i) / (i / el) if el > 0 else 0

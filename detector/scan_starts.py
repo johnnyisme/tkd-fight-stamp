@@ -273,6 +273,46 @@ def main():
             eta = (len(boundaries) - bi) / (bi / el) if el > 0 else 0
             print(f"PROGRESS {100*bi/len(boundaries):5.1f}%  {bi}/{len(boundaries)}  "
                   f"確認開賽 {len(crossings)}  剩約 {int(eta//60)}分{int(eta%60)}秒", flush=True)
+    # Pass3(HOLD_MODE):遞減序列回推。有些場地開賽瞬間滿值(1:30/2:00)沒被讀到
+    # → Pass1 不建邊界、Pass2 沒機會驗 → 整場漏(第三場地 2-3 小時大量如此)。
+    # 但計時器遞減本身讀得很清楚。故直接從粗掃 states 找「單調遞減段」,回推開賽點:
+    #   開賽秒 ≈ 該遞減段第一點時間 -(round_full - 該點的計時器值)。
+    # 這條只加分不減分(找到的併入 crossings),且僅 HOLD_MODE,不動已驗證影片。
+    approx = set()  # Pass3 回推的點(落點粗估,標記給複審)
+    if hold_mode:
+        # 用「滑動窗」找遞減趨勢,容忍中間雜訊(粗掃4秒必有 None/跳動,不能要求連續嚴格遞減)。
+        # 策略:掃高信心讀數,以「時間相鄰(≤step*2)且整體趨勢下降」聚成一場的遞減段。
+        pts = [(t, s) for (t, s, c, st) in states
+               if s is not None and c >= 0.7 and 0 < s <= round_full]
+        added = 0
+        i2 = 0
+        n = len(pts)
+        while i2 < n:
+            # 從 pts[i2] 起貪婪收集「時間相鄰且值不回升太多」的點成一段
+            seg = [pts[i2]]
+            j = i2 + 1
+            while j < n:
+                pt, ps = pts[j]
+                lt, ls = seg[-1]
+                if pt - lt > 40:       # 時間斷太久 = 換場
+                    break
+                if ps <= ls + 5:       # 允許 ±5 秒 OCR 抖動,但整體要往下
+                    seg.append(pts[j]); j += 1
+                else:
+                    break
+            # 評估這段:去頭尾雜訊看趨勢(第一點 vs 最後點)
+            span = seg[0][1] - seg[-1][1]
+            downs = sum(1 for k in range(1, len(seg)) if seg[k][1] < seg[k-1][1])
+            if len(seg) >= 4 and span >= round_full * 0.45 and downs >= 3:
+                t0, s0 = seg[0]
+                start = max(0, t0 - (round_full - s0))  # 回推到滿值刻(粗略,複審會調)
+                if start < t0 - round_full - 5:
+                    start = t0
+                if not any(abs(start - c) < 40 for c in crossings):
+                    crossings.append(start); approx.add(start); added += 1
+            i2 = max(j, i2 + 1)
+        print(f"PASS3 遞減回推: 補了 {added} 場(落點粗估,標記 approx)", flush=True)
+
     crossings = sorted(set(crossings))
     # HOLD_MODE:同場待命抖動可能收到多個相近 cross(如 19:52/20:12 其實同一場),
     # 相鄰 < MERGE_GAP 秒者合併取最早,讓複審清單乾淨(仍寧可多抓,只去掉同場重複)。
@@ -285,16 +325,21 @@ def main():
         crossings = merged
     print(f"PASS2: {len(crossings)} precise crossings (真開賽,已遞減驗證): {crossings}", flush=True)
 
+    # approx 點(Pass3 回推)落點粗估,標記給複審重點對時間。
+    def is_approx(s):
+        return any(abs(s - a) < 40 for a in approx)
+
     # 不聚類:保留所有回合起跑點,交給「第一回合分類器」判斷哪些是真開賽。
     result = {"video": os.path.basename(video), "round_full_sec": round_full,
-              "note": "全片所有計時器 2:00→1:59 交界(含第1/2/3回合)。待第一回合分類器過濾。",
+              "note": "全片所有計時器交界(含第1/2/3回合)。approx=True 為遞減回推、落點粗估需對時間。",
               "crossings": [{"index": i+1, "t_sec": s,
-                             "timestamp": f"{s//3600:02d}:{s%3600//60:02d}:{s%60:02d}"}
+                             "timestamp": f"{s//3600:02d}:{s%3600//60:02d}:{s%60:02d}",
+                             "approx": is_approx(s)}
                             for i, s in enumerate(crossings)]}
     json.dump(result, open(out_json, "w"), ensure_ascii=False, indent=2)
-    print(f"\nDONE: {len(crossings)} crossings -> {out_json}", flush=True)
+    print(f"\nDONE: {len(crossings)} crossings ({len(approx)} 粗估) -> {out_json}", flush=True)
     for c in result["crossings"]:
-        print(f"  #{c['index']:2d} {c['timestamp']}", flush=True)
+        print(f"  #{c['index']:2d} {c['timestamp']}{' ~粗估' if c['approx'] else ''}", flush=True)
 
 
 if __name__ == "__main__":

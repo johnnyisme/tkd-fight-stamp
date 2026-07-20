@@ -123,9 +123,9 @@ def main():
     skip_cls = os.environ.get("SKIP_CLS") == "1"
     if skip_cls:
         # 跳過分類器:所有掃描交界都當開賽點(計分板太小/OCR不穩、分類器不可靠時)。
-        # 由使用者複審刪第二三回合。conf 標 1.0 佔位。
+        # 由使用者複審刪第二三回合。conf 標 1.0 佔位。保留 approx 標記。
         print(f"FINALIZE 跳過第一回合分類(SKIP_CLS),{total} 個交界全保留", flush=True)
-        r1 = [(c["t_sec"], 1.0) for c in crossings]
+        r1 = [(c["t_sec"], 1.0, bool(c.get("approx"))) for c in crossings]
         print(f"PROGRESS 100.0%  {total}/{total}  跳過分類,全保留 {total}", flush=True)
     else:
         import time as _time
@@ -136,7 +136,7 @@ def main():
             tag = "round1" if is_r1 else ("other" if is_r1 is not None else "no-board")
             print(f"  {t//3600:02d}:{t%3600//60:02d}:{t%60:02d}  {tag}({conf:.2f})", flush=True)
             if is_r1:
-                r1.append((t, conf))
+                r1.append((t, conf, bool(c.get("approx"))))
             if i % 10 == 0 or i == total:
                 el = _time.time() - t0
                 eta = (total - i) / (i / el) if el > 0 else 0
@@ -145,24 +145,24 @@ def main():
     # 同場重複去重:相鄰 < dedup 秒,取最早
     r1.sort()
     merged = []
-    for t, conf in r1:
+    for t, conf, ap in r1:
         if merged and t - merged[-1][0] < dedup:
             continue  # 同場第一回合的重複交界,已有更早的
-        merged.append((t, conf))
+        merged.append((t, conf, ap))
 
     # 統一往前 2 秒(寧早勿晚):交界 OCR 常落在 1:58,-2 秒回到開賽瞬間、不會晚。
     OFFSET = 2
     cands = [{"index": i+1, "t_sec": max(0, t - OFFSET),
               "timestamp": f"{max(0,t-OFFSET)//3600:02d}:{max(0,t-OFFSET)%3600//60:02d}:{max(0,t-OFFSET)%60:02d}",
-              "cls_conf": round(conf, 2), "method": "round1_start"}
-             for i, (t, conf) in enumerate(merged)]
+              "cls_conf": round(conf, 2), "method": "round1_start", "approx": ap}
+             for i, (t, conf, ap) in enumerate(merged)]
     out = {"video": data.get("video"), "youtube_url": "https://www.youtube.com/watch?v=X-HcwuHepFU",
-           "note": "計時器交界 → 第一回合分類器過濾 → 同場去重。每個 = 一場真開賽。請覆核。",
+           "note": "計時器交界 → 第一回合分類器過濾 → 同場去重。approx=True 為遞減回推、落點粗估需對時間。",
            "candidates": cands}
     json.dump(out, open(out_json, "w"), ensure_ascii=False, indent=2)
     print(f"\nDONE: {len(data['crossings'])} 交界 → {len(r1)} 第一回合 → 去重後 {len(merged)} 場 -> {out_json}", flush=True)
     for c in cands:
-        print(f"  #{c['index']:2d} {c['timestamp']} (cls {c['cls_conf']})", flush=True)
+        print(f"  #{c['index']:2d} {c['timestamp']} (cls {c['cls_conf']}){' ~粗估' if c['approx'] else ''}", flush=True)
 
 
 if __name__ == "__main__":
