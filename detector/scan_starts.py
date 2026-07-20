@@ -54,6 +54,18 @@ def parse_timer(text, round_full=120):
     return valid[0] if valid else None
 
 
+def pick_board(boxes, W, H):
+    """從偵測到的計分板挑「本場地主用台」。
+    排除貼著畫面邊緣的 box —— 被切邊 = 資訊不完整 = 通常是別場地/轉播台,完全捨棄
+    (user 確認:只有部份資訊的那台要丟)。剩下的取 conf 最高。全被排除才 fallback 用原始最高。"""
+    margin = 8  # 距畫面邊 <margin px 視為切邊
+    full = [b for b in boxes
+            if b.xyxy[0][0] > margin and b.xyxy[0][1] > margin
+            and b.xyxy[0][2] < W - margin and b.xyxy[0][3] < H - margin]
+    pool = full if full else list(boxes)
+    return max(pool, key=lambda b: float(b.conf))
+
+
 def timer_at(video, t):
     cmd = ["ffmpeg", "-y", "-ss", str(t), "-i", video, "-frames:v", "1"]
     if SCALE:
@@ -66,7 +78,8 @@ def timer_at(video, t):
     r = BOARD.predict(frame, conf=0.25, device="mps", verbose=False)[0]
     if len(r.boxes) == 0:
         return None, 0.0
-    b = max(r.boxes, key=lambda b: float(b.conf))
+    H, W = frame.shape[:2]
+    b = pick_board(r.boxes, W, H)
     x1, y1, x2, y2 = [int(v) for v in b.xyxy[0].tolist()]
     H, W = frame.shape[:2]; pad = 6
     bd = frame[max(0,y1-pad):min(H,y2+pad), max(0,x1-pad):min(W,x2+pad)]

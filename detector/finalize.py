@@ -23,6 +23,15 @@ ROUND_FULL = int(os.environ.get("ROUND_FULL", "120"))  # 一回合秒數(找開�
 _reader = None
 
 
+def pick_board(boxes, W, H):
+    """挑本場地主用台:排除貼畫面邊緣(切邊=資訊不完整=別場地/轉播台,捨棄),取 conf 最高。
+    與 scan_starts.pick_board 一致,確保掃描/分類/裁圖選到同一台。"""
+    m = 8
+    full = [b for b in boxes if b.xyxy[0][0] > m and b.xyxy[0][1] > m
+            and b.xyxy[0][2] < W - m and b.xyxy[0][3] < H - m]
+    return max(full if full else list(boxes), key=lambda b: float(b.conf))
+
+
 def _read_timer(video, t, tmp):
     """讀 t 秒計時器秒數(讀不到回 None)。與 crop_crossings 一致,供往前找開賽瞬間。"""
     global _reader
@@ -40,9 +49,9 @@ def _read_timer(video, t, tmp):
     r = BOARD.predict(fr, conf=0.25, device="mps", verbose=False)[0]
     if len(r.boxes) == 0:
         return None
-    b = max(r.boxes, key=lambda b: float(b.conf))
-    x1, y1, x2, y2 = [int(v) for v in b.xyxy[0].tolist()]
     H, W = fr.shape[:2]
+    b = pick_board(r.boxes, W, H)
+    x1, y1, x2, y2 = [int(v) for v in b.xyxy[0].tolist()]
     bd = fr[max(0, y1-6):min(H, y2+6), max(0, x1-6):min(W, x2+6)]
     h, w = bd.shape[:2]
     sub = bd[int(0.52*h):int(0.74*h), int(0.36*w):int(0.64*w)]
@@ -91,7 +100,7 @@ def classify_crossing(video, t, tmp):
     r = BOARD.predict(fr, conf=0.25, device="mps", verbose=False)[0]
     if len(r.boxes) == 0:
         return None, 0.0
-    b = max(r.boxes, key=lambda b: float(b.conf))
+    b = pick_board(r.boxes, W, H)
     x1, y1, x2, y2 = [int(v) for v in b.xyxy[0].tolist()]
     pad = 6
     bd = fr[max(0,y1-pad):min(H,y2+pad), max(0,x1-pad):min(W,x2+pad)]

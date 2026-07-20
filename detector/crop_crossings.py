@@ -12,6 +12,14 @@ import easyocr
 HERE = os.path.dirname(os.path.abspath(__file__))
 BOARD = YOLO(os.path.join(HERE, "runs", os.environ.get("SB_MODEL", "scoreboard_v1"), "weights", "best.pt"))
 ROUND_FULL = int(os.environ.get("ROUND_FULL", "120"))  # 一回合秒數(找開賽瞬間用)
+
+
+def pick_board(boxes, W, H):
+    """挑本場地主用台:排除貼畫面邊緣的切邊台(別場地/轉播,捨棄),取 conf 最高。"""
+    m = 8
+    full = [b for b in boxes if b.xyxy[0][0] > m and b.xyxy[0][1] > m
+            and b.xyxy[0][2] < W - m and b.xyxy[0][3] < H - m]
+    return max(full if full else list(boxes), key=lambda b: float(b.conf))
 _reader = None
 
 
@@ -35,9 +43,9 @@ def read_timer(video, t, tmp, scale):
     r = BOARD.predict(fr, conf=0.25, device="mps", verbose=False)[0]
     if len(r.boxes) == 0:
         return None
-    b = max(r.boxes, key=lambda b: float(b.conf))
-    x1, y1, x2, y2 = [int(v) for v in b.xyxy[0].tolist()]
     H, W = fr.shape[:2]
+    b = pick_board(r.boxes, W, H)
+    x1, y1, x2, y2 = [int(v) for v in b.xyxy[0].tolist()]
     bd = fr[max(0, y1-6):min(H, y2+6), max(0, x1-6):min(W, x2+6)]
     h, w = bd.shape[:2]
     sub = bd[int(0.52*h):int(0.74*h), int(0.36*w):int(0.64*w)]
@@ -96,7 +104,7 @@ def main():
         r = BOARD.predict(fr, conf=0.25, device="mps", verbose=False)[0]
         if len(r.boxes) == 0:
             continue
-        b = max(r.boxes, key=lambda b: float(b.conf))
+        b = pick_board(r.boxes, W, H)
         x1, y1, x2, y2 = [int(v) for v in b.xyxy[0].tolist()]
         pad = 6
         bd = fr[max(0,y1-pad):min(H,y2+pad), max(0,x1-pad):min(W,x2+pad)]
