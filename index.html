@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TKDFightStamp | 支援 wego-tkd-web.onrender.com 與 tondar-cn.com</title>
-  <meta name="description" content="TKDFightStamp 是一個 YouTube 跆拳道對戰時間戳標記工具，目前支援 wego-tkd-web.onrender.com 與 tondar-cn.com 的對戰網址。">
+  <title>TKDFightStamp | 開賽時間戳複審 + 對戰表匹配</title>
+  <meta name="description" content="貼上開賽時間戳與場次,對照 YouTube 影片複審,匹配 wego-tkd / tondar-cn 對戰表,產出 YouTube 章節清單。">
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -12,22 +12,13 @@
     <header class="hero card">
       <div class="hero-copy">
         <div class="product-badge">TKDFightStamp</div>
-        <h1>把 4.5 小時比賽影片整理成可查找的逐場時間戳</h1>
-        <p>載入 YouTube 影片、對照場次表、在選手準備對戰前按一下就記下時間。適合逐場整理跆拳道對戰影片、說明欄索引與賽事回看。目前僅支援 wego-tkd-web.onrender.com 與 tondar-cn.com 的對戰網址。</p>
-        <div class="feature-chips">
-          <span>逐場標記</span>
-          <span>YouTube 播放控制</span>
-          <span>TXT 匯出</span>
-          <span>本機儲存進度</span>
-        </div>
+        <h1>開賽時間戳複審 + 對戰表匹配</h1>
+        <p>左側播放 YouTube 影片,右側純文字自由編輯每場「時間戳 場次」。把游標放某一行按「跳到本行時間」對照影片。填入賽事後按「補齊對戰資訊」,用場次號自動補上選手/單位/勝敗/分組/賽別,產出可貼 YouTube 說明欄的章節清單。</p>
       </div>
       <div class="hero-side">
         <div class="status-panel">
           <div>目前時間 <strong id="current-time">00:00:00</strong></div>
-          <div>已標記 <strong id="recorded-count">0</strong> / <strong id="total-count">0</strong></div>
-        </div>
-        <div class="hero-note">
-          建議流程：先貼入 YouTube 影片，再用快捷鍵 <strong>N</strong> 逐場記錄時間，最後從右側匯出結果直接貼回說明欄或備註檔。
+          <div class="hero-note">格式:每行 <code>時間戳 &lt;tab或空格&gt; 場次</code>,例如 <code>00:02:32　301</code>。時間戳後的 <code>~</code> 表示落點粗估、需對一下時間。</div>
         </div>
       </div>
     </header>
@@ -35,7 +26,7 @@
     <main class="layout">
       <section class="video-panel card">
         <div class="section-title-row">
-          <h2>影片標記</h2>
+          <h2>影片</h2>
           <span class="section-tag">核心工作區</span>
         </div>
         <label class="field-label" for="youtube-url">影片網址或 ID</label>
@@ -45,69 +36,66 @@
         </div>
         <div id="player-frame" class="player-frame"></div>
         <div class="player-actions">
-          <button id="back-5-btn" type="button">倒退 60 秒</button>
-          <button id="forward-5-btn" type="button">快進 60 秒</button>
+          <button id="back-5-btn" type="button">倒退 5 秒</button>
+          <button id="forward-5-btn" type="button">快進 5 秒</button>
           <button id="toggle-play-btn" type="button">播放 / 暫停</button>
         </div>
-        <p class="hint">快捷鍵：<kbd>N</kbd> 記錄並跳下一場，<kbd>P</kbd> 上一場，<kbd>J</kbd> 倒退 60 秒，<kbd>L</kbd> 快進 60 秒，<kbd>Space</kbd> 播放/暫停。</p>
+        <p class="hint">快捷鍵:<kbd>Space</kbd> 播放/暫停,<kbd>J</kbd> 倒退5秒,<kbd>L</kbd> 快進5秒(游標不在文字框時)。</p>
       </section>
 
-      <section class="matches-panel card">
+      <section class="review-panel card">
         <div class="section-title-row">
-          <h2>對戰清單</h2>
-          <div class="inline-stats">
-            <span>待處理 <strong id="remaining-count">0</strong></span>
-          </div>
+          <h2>① 開賽時間戳(純文字複審)</h2>
+          <span id="line-status" class="inline-stats"></span>
         </div>
-        <label class="field-label" for="event-url">賽事網址</label>
-        <div class="input-row">
-          <input id="event-url" type="text" placeholder="https://wego-tkd-web.onrender.com/event/3 或 https://www.tondar-cn.com/Competition/ScheduleC.php?EventNo=10">
-          <button id="generate-from-event-btn" type="button">抓取對戰表</button>
-        </div>
-        <p class="hint">目前支援的對戰網址只有這兩種：`https://wego-tkd-web.onrender.com/event/20260406`、`https://www.tondar-cn.com/Competition/ScheduleC.php?EventNo=10`。其他對戰網址目前不支援；若有新需求可直接加 LINE ID: johnnyisme01。</p>
-        <label class="field-label" for="event-date">競賽日期（全中運選填）</label>
-        <div class="input-row">
-          <select id="event-date">
-            <option value="">全部日期</option>
-          </select>
-        </div>
-        <div id="fetch-status" class="fetch-status" aria-live="polite"></div>
-        <label class="field-label" for="source-text">原始場次表</label>
-        <textarea id="source-text" rows="8" placeholder="可直接貼上場次表，或讓工具自動讀取同資料夾的對打第二天-各場地對戰資訊.txt"></textarea>
         <div class="input-row compact-gap">
-          <button id="load-matches-btn" type="button">載入場次</button>
-          <button id="reset-progress-btn" type="button" class="secondary">清空所有時間戳</button>
-          <label class="checkbox-label">
-            <input id="auto-next" type="checkbox" checked>
-            記錄後自動跳下一場
-          </label>
+          <button id="jump-line-btn" type="button" class="secondary">跳到本行時間</button>
+          <button id="insert-now-btn" type="button" class="secondary">插入目前時間</button>
+          <span id="candidate-status" class="fetch-status"></span>
         </div>
-
-        <div class="match-toolbar">
-          <button id="prev-btn" type="button" class="secondary">上一場</button>
-          <button id="mark-btn" type="button">記錄目前時間</button>
-          <button id="clear-btn" type="button" class="secondary">清除此場</button>
-          <button id="next-btn" type="button" class="secondary">下一場</button>
-        </div>
-
-        <div id="current-match-card" class="current-match-card empty">
-          尚未載入場次
-        </div>
-
-        <div id="match-list" class="match-list"></div>
+        <textarea id="editor" class="editor" spellcheck="false"
+          placeholder="貼上每場「時間戳 場次」,一行一場。例如：&#10;00:02:32　301&#10;00:08:11　303"></textarea>
+        <p class="hint">游標點在某一行 → 「跳到本行時間」對照影片。播到精確開賽點 → 「插入目前時間」在游標處補一行。自由改/插/刪。自動儲存。</p>
       </section>
 
       <section class="export-panel card">
         <div class="section-title-row">
-          <h2>匯出時間戳</h2>
-          <span class="section-tag">可直接複製</span>
+          <h2>② 補齊對戰資訊 → 匯出</h2>
+          <span class="section-tag">對照對戰表</span>
+        </div>
+        <label class="field-label" for="merge-source">對戰表來源</label>
+        <div class="input-row compact-gap">
+          <select id="merge-source" title="對戰表系統">
+            <option value="wego">wego-tkd(onrender)</option>
+            <option value="tondar">tondar-cn(國選)</option>
+          </select>
+        </div>
+        <div id="wego-fields">
+          <label class="field-label" for="event-id">賽事 event 網址或 ID(例如 3 或 https://wego-tkd-web.onrender.com/event/3)</label>
+          <div class="input-row compact-gap">
+            <input id="event-id" type="text" placeholder="3">
+          </div>
+        </div>
+        <div id="tondar-fields" style="display:none">
+          <label class="field-label" for="tondar-eventno">tondar EventNo(例如 10,或整個 ScheduleC 網址)</label>
+          <div class="input-row compact-gap">
+            <input id="tondar-eventno" type="text" placeholder="10">
+            <button id="tondar-load-dates-btn" type="button" class="secondary">載入日期</button>
+            <select id="tondar-date" title="比賽日期"><option value="">先載入日期</option></select>
+          </div>
         </div>
         <div class="input-row compact-gap">
-          <button id="copy-output-btn" type="button">複製結果</button>
-          <button id="download-output-btn" type="button" class="secondary">下載 TXT</button>
+          <button id="build-final-btn" type="button">補齊對戰資訊</button>
+          <span id="merge-status" class="fetch-status"></span>
         </div>
-        <textarea id="output-text" rows="20" readonly></textarea>
-        <p class="hint">匯出格式會在每場前面補上時間戳，例如 01:23:45 101 弘道國中 郭采婕...</p>
+        <div class="input-row compact-gap">
+          <button id="copy-btn" type="button">複製上方清單(時間戳＋場次)</button>
+          <button id="copy-final-btn" type="button" class="secondary">複製完整清單</button>
+          <button id="download-final-btn" type="button" class="secondary">下載完整清單</button>
+        </div>
+        <p class="hint">填賽事 → 「補齊對戰資訊」→ 自動爬對戰表,用場次號補上選手/單位/勝敗/分組/賽別,完整清單顯示在下方。</p>
+        <textarea id="final-output" class="editor" rows="12" readonly
+          placeholder="補完對戰資訊(選手/單位/勝敗/分組/賽別)的完整清單會顯示在這裡。"></textarea>
       </section>
     </main>
   </div>
